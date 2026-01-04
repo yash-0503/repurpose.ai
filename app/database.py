@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import Column, String, Text, DateTime, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 import uuid
 
@@ -37,9 +37,6 @@ class User(Base):
     name = Column(String(255))
     avatar_url = Column(Text)
     default_style_id = Column(UUID(as_uuid=True), ForeignKey("styles.id", ondelete="SET NULL"), nullable=True)
-    # API Keys stored as encrypted JSON: {"openai": "encrypted...", "anthropic": "encrypted..."}
-    api_keys = Column(JSONB, default=dict)
-    default_provider = Column(String(50), default="gemini")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
