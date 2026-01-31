@@ -24,6 +24,12 @@ function AppContent() {
   const [currentTitle, setCurrentTitle] = useState('');
 
   const handleGenerate = async (url, style, styleId, format) => {
+    // Check if user is logged in
+    if (!user || !token) {
+      setError('Please log in to generate content');
+      return;
+    }
+
     setLoading(true);
     setError('');
     setStep(2);
@@ -32,13 +38,13 @@ function AppContent() {
     try {
       // Stage 1: Download audio
       setCurrentStage('download');
-      const downloadResult = await downloadAudio(url);
+      const downloadResult = await downloadAudio(token, url);
       console.log('Download complete:', downloadResult);
       setCurrentTitle(downloadResult.title);
 
       // Stage 2: Transcribe audio
       setCurrentStage('transcribe');
-      const transcribeResult = await transcribeAudio(downloadResult.audio_path);
+      const transcribeResult = await transcribeAudio(token, downloadResult.audio_path);
       console.log('Transcription complete:', transcribeResult);
 
       // Stage 3: Generate content (style analysis happens in backend if needed)

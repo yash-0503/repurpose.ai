@@ -103,10 +103,10 @@ export async function deleteBlog(token, blogId) {
 
 // ============ Core Features ============
 
-export async function downloadAudio(url) {
+export async function downloadAudio(token, url) {
   const response = await fetch(`${API_BASE}/download`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders(token),
     body: JSON.stringify({ url }),
   });
   if (!response.ok) {
@@ -116,10 +116,10 @@ export async function downloadAudio(url) {
   return response.json();
 }
 
-export async function transcribeAudio(audioPath) {
+export async function transcribeAudio(token, audioPath) {
   const response = await fetch(`${API_BASE}/transcribe`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders(token),
     body: JSON.stringify({ audio_path: audioPath }),
   });
   if (!response.ok) {
@@ -129,10 +129,10 @@ export async function transcribeAudio(audioPath) {
   return response.json();
 }
 
-export async function analyzeStyle(referenceText) {
+export async function analyzeStyle(token, referenceText) {
   const response = await fetch(`${API_BASE}/analyze-style`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders(token),
     body: JSON.stringify({ reference_text: referenceText }),
   });
   if (!response.ok) {

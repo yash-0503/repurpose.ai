@@ -34,11 +34,12 @@ const OUTPUT_FORMATS = {
   }
 };
 
-export default function OutputFormatSelector({ selectedFormat, onFormatChange }) {
+export default function OutputFormatSelector({ selectedFormat, onFormatChange, disabled = false }) {
   const [subOption, setSubOption] = useState('medium'); // Default for linkedin
   const [twitterOption, setTwitterOption] = useState('thread'); // Default for twitter
 
   const handleFormatSelect = (formatId) => {
+    if (disabled) return;
     let option = null;
     if (formatId === 'linkedin') {
       option = subOption;
@@ -49,6 +50,7 @@ export default function OutputFormatSelector({ selectedFormat, onFormatChange })
   };
 
   const handleSubOptionChange = (formatId, optionId) => {
+    if (disabled) return;
     if (formatId === 'linkedin') {
       setSubOption(optionId);
       onFormatChange({ format: 'linkedin', option: optionId });
@@ -63,7 +65,7 @@ export default function OutputFormatSelector({ selectedFormat, onFormatChange })
       <label className="input-label">Output Format</label>
       <p className="format-hint">Choose where you'll share this content</p>
       
-      <div className="format-options">
+      <div className="format-options" style={{ opacity: disabled ? 0.5 : 1, pointerEvents: disabled ? 'none' : 'auto' }}>
         {Object.values(OUTPUT_FORMATS).map((format) => (
           <div key={format.id} className="format-option-wrapper">
             <div 
@@ -91,6 +93,7 @@ export default function OutputFormatSelector({ selectedFormat, onFormatChange })
                       name="linkedin-length"
                       checked={subOption === opt.id}
                       onChange={() => handleSubOptionChange('linkedin', opt.id)}
+                      disabled={disabled}
                     />
                     <span className="sub-option-label">{opt.label}</span>
                     <span className="sub-option-desc">{opt.desc}</span>
@@ -109,6 +112,7 @@ export default function OutputFormatSelector({ selectedFormat, onFormatChange })
                       name="twitter-type"
                       checked={twitterOption === opt.id}
                       onChange={() => handleSubOptionChange('twitter', opt.id)}
+                      disabled={disabled}
                     />
                     <span className="sub-option-label">{opt.label}</span>
                     <span className="sub-option-desc">{opt.desc}</span>

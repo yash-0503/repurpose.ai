@@ -6,7 +6,8 @@ export default function StyleSelector({
   selectedStyleId, 
   onStyleSelect, 
   customStyle, 
-  onCustomStyleChange 
+  onCustomStyleChange,
+  disabled = false
 }) {
   const { user, token } = useAuth();
   const [styles, setStyles] = useState([]);
@@ -41,6 +42,7 @@ export default function StyleSelector({
   }, [user, token]);
 
   const handleModeChange = (newMode) => {
+    if (disabled) return;
     setMode(newMode);
     if (newMode === 'default') {
       onStyleSelect(null);
@@ -56,10 +58,11 @@ export default function StyleSelector({
   // If not logged in, show simple custom style input
   if (!user) {
     return (
-      <div className={`collapsible ${showCustom ? 'open' : ''}`}>
+      <div className={`collapsible ${showCustom ? 'open' : ''}`} style={{ opacity: disabled ? 0.5 : 1 }}>
         <div 
           className="collapsible-header"
-          onClick={() => setShowCustom(!showCustom)}
+          onClick={() => !disabled && setShowCustom(!showCustom)}
+          style={{ pointerEvents: disabled ? 'none' : 'auto' }}
         >
           <div className="collapsible-title">
             <span className="collapsible-icon">✍</span>
@@ -76,6 +79,7 @@ export default function StyleSelector({
             placeholder="Paste a sample of your writing here (at least 100 characters)..."
             value={customStyle}
             onChange={(e) => onCustomStyleChange(e.target.value)}
+            disabled={disabled}
           />
         </div>
       </div>
@@ -83,7 +87,7 @@ export default function StyleSelector({
   }
 
   return (
-    <div className="style-selector">
+    <div className="style-selector" style={{ opacity: disabled ? 0.5 : 1, pointerEvents: disabled ? 'none' : 'auto' }}>
       <label className="input-label">Writing Style</label>
       
       <div className="style-options">
@@ -95,6 +99,7 @@ export default function StyleSelector({
               name="styleMode" 
               checked={mode === 'your_style'}
               onChange={() => handleModeChange('your_style')}
+              disabled={disabled}
             />
             <div className="style-option-content">
               <span className="style-option-label">✨ Your Style</span>
@@ -110,6 +115,7 @@ export default function StyleSelector({
             name="styleMode" 
             checked={mode === 'default'}
             onChange={() => handleModeChange('default')}
+            disabled={disabled}
           />
           <div className="style-option-content">
             <span className="style-option-label">📝 Default</span>
@@ -124,6 +130,7 @@ export default function StyleSelector({
             name="styleMode" 
             checked={mode === 'custom'}
             onChange={() => handleModeChange('custom')}
+            disabled={disabled}
           />
           <div className="style-option-content">
             <span className="style-option-label">✍️ Enter New Style</span>
@@ -142,6 +149,7 @@ export default function StyleSelector({
             placeholder="Paste a sample of your writing here (at least 100 characters)..."
             value={customStyle}
             onChange={(e) => onCustomStyleChange(e.target.value)}
+            disabled={disabled}
           />
         </div>
       )}

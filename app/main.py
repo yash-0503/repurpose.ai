@@ -12,9 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from sqlalchemy.orm import selectinload
 
-from app.services.audio_downloader import simple_download
-from app.services.transcriber import simple_transcribe
-from app.services.style_analyzer import analyze_style
+from app.services.audio_downloader import download_audio as download_audio_service, AudioDownloadError, cleanup_audio_file
+from app.services.transcriber import transcribe_audio as transcribe_audio_service, TranscriptionError
+from app.services.style_analyzer import analyze_style, StyleAnalysisError
 from app.services.generate_blog_from_style import generate_blog_from_transcript
 from app.database import get_db, User, Style, Blog, init_db
 from app.auth import (
@@ -338,57 +338,60 @@ async def delete_blog(
 # ============ Core Endpoints ============
 
 @app.post("/api/download", response_model=DownloadResponse)
-async def download_audio(request: DownloadRequest):
-    """Download audio from a YouTube URL"""
+async def download_audio(
+    request: DownloadRequest,
+    user: User = Depends(get_current_user_required)
+):
+    """Download audio from a YouTube URL to temporary storage (requires authentication)"""
     try:
-        print(f"📥 Downloading audio from: {request.url}")
-        audio_path = simple_download(request.url, output_dir='downloads')
-        
-        # Extract title from filename
-        title = os.path.splitext(os.path.basename(audio_path))[0]
+        print(f"📥 Downloading audio from: {request.url} (user: {user.email})")
+        audio_path, title = await asyncio.to_thread(download_audio_service, request.url, use_temp=True)
         
         return DownloadResponse(
             status="success",
             audio_path=audio_path,
             title=title
         )
+    except AudioDownloadError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
 
 
 @app.post("/api/transcribe", response_model=TranscribeResponse)
-async def transcribe_audio(request: TranscribeRequest):
-    """Transcribe an audio file using Whisper"""
+async def transcribe_audio(
+    request: TranscribeRequest,
+    user: User = Depends(get_current_user_required)
+):
+    """Transcribe an audio file using Whisper and cleanup temp file (requires authentication)"""
     try:
-        print(f"🎙️ Transcribing audio: {request.audio_path}")
+        print(f"🎙️ Transcribing audio: {request.audio_path} (user: {user.email})")
         
-        if not os.path.exists(request.audio_path):
-            raise HTTPException(status_code=404, detail=f"Audio file not found: {request.audio_path}")
+        # Transcribe audio
+        result = await asyncio.to_thread(transcribe_audio_service, request.audio_path)
         
-        result = simple_transcribe(request.audio_path)
+        # Cleanup temp file after transcription
+        cleanup_audio_file(request.audio_path)
         
         return TranscribeResponse(
             status="success",
             language=result.get('language', 'unknown'),
             text=result['text']
         )
-    except HTTPException:
-        raise
+    except TranscriptionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
 
 
 @app.post("/api/analyze-style", response_model=StyleAnalyzeResponse)
-async def analyze_writing_style(request: StyleAnalyzeRequest):
-    """Analyze writing style from reference text"""
+async def analyze_writing_style(
+    request: StyleAnalyzeRequest,
+    user: User = Depends(get_current_user_required)
+):
+    """Analyze writing style from reference text (requires authentication)"""
     try:
-        print("✍️ Analyzing writing style...")
-        
-        if not request.reference_text or len(request.reference_text.strip()) < 100:
-            raise HTTPException(
-                status_code=400, 
-                detail="Reference text must be at least 100 characters"
-            )
+        print(f"✍️ Analyzing writing style... (user: {user.email})")
         
         # Run in thread to avoid asyncio.run() conflict with FastAPI's event loop
         style_guide = await asyncio.to_thread(analyze_style, request.reference_text)
@@ -397,8 +400,8 @@ async def analyze_writing_style(request: StyleAnalyzeRequest):
             status="success",
             style_guide=style_guide
         )
-    except HTTPException:
-        raise
+    except StyleAnalysisError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Style analysis failed: {str(e)}")
 
@@ -406,10 +409,10 @@ async def analyze_writing_style(request: StyleAnalyzeRequest):
 @app.post("/api/generate-blog", response_model=GenerateBlogResponse)
 async def generate_blog(
     request: GenerateBlogRequest,
-    user: Optional[User] = Depends(get_current_user),
+    user: User = Depends(get_current_user_required),
     db: AsyncSession = Depends(get_db)
 ):
-    """Generate content from transcript with platform-specific formatting"""
+    """Generate content from transcript with platform-specific formatting (requires authentication)"""
     try:
         format_label = {
             "blog": "📝 Blog",
@@ -429,7 +432,7 @@ async def generate_blog(
         style_id = None
         
         # Option 1: User selected a saved style
-        if request.style_id and user:
+        if request.style_id:
             result = await db.execute(
                 select(Style).where(Style.id == request.style_id, Style.user_id == user.id)
             )
@@ -445,30 +448,29 @@ async def generate_blog(
             analyzed_style = await asyncio.to_thread(analyze_style, request.style_guide)
             style = analyzed_style
             
-            # Save as "My Style" if user is authenticated
-            if user:
-                # Check if user already has "My Style"
-                result = await db.execute(
-                    select(Style).where(Style.user_id == user.id, Style.name == "My Style")
+            # Save as "My Style"
+            # Check if user already has "My Style"
+            result = await db.execute(
+                select(Style).where(Style.user_id == user.id, Style.name == "My Style")
+            )
+            existing_style = result.scalar_one_or_none()
+            
+            if existing_style:
+                # Update existing style
+                existing_style.style_guide = analyzed_style
+                style_id = existing_style.id
+                print("🔄 Updated existing 'My Style'")
+            else:
+                # Create new style
+                new_style = Style(
+                    user_id=user.id,
+                    name="My Style",
+                    style_guide=analyzed_style
                 )
-                existing_style = result.scalar_one_or_none()
-                
-                if existing_style:
-                    # Update existing style
-                    existing_style.style_guide = analyzed_style
-                    style_id = existing_style.id
-                    print("🔄 Updated existing 'My Style'")
-                else:
-                    # Create new style
-                    new_style = Style(
-                        user_id=user.id,
-                        name="My Style",
-                        style_guide=analyzed_style
-                    )
-                    db.add(new_style)
-                    await db.flush()
-                    style_id = new_style.id
-                    print("✨ Saved new 'My Style'")
+                db.add(new_style)
+                await db.flush()
+                style_id = new_style.id
+                print("✨ Saved new 'My Style'")
         
         # Run in thread to avoid asyncio.run() conflict with FastAPI's event loop
         blog_content = await asyncio.to_thread(
@@ -479,22 +481,19 @@ async def generate_blog(
             request.output_option
         )
         
-        blog_id = None
-        
-        # Auto-save blog if user is authenticated
-        if user:
-            blog = Blog(
-                user_id=user.id,
-                title=request.title,
-                youtube_url=request.youtube_url,
-                content=blog_content,
-                style_id=style_id
-            )
-            db.add(blog)
-            await db.commit()
-            await db.refresh(blog)
-            blog_id = str(blog.id)
-            print(f"💾 Blog auto-saved with ID: {blog_id}")
+        # Auto-save blog (user is always authenticated now)
+        blog = Blog(
+            user_id=user.id,
+            title=request.title,
+            youtube_url=request.youtube_url,
+            content=blog_content,
+            style_id=style_id
+        )
+        db.add(blog)
+        await db.commit()
+        await db.refresh(blog)
+        blog_id = str(blog.id)
+        print(f"💾 Blog auto-saved with ID: {blog_id}")
         
         return GenerateBlogResponse(
             status="success",
