@@ -2,7 +2,8 @@ import yt_dlp
 import os
 import logging
 import tempfile
-from typing import Tuple
+import base64
+from typing import Tuple, Optional
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -13,13 +14,37 @@ logger = logging.getLogger(__name__)
 DOWNLOAD_DIR = Path(os.getenv("DOWNLOAD_DIR", "downloads"))
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_AUDIO_SIZE_MB", "100"))
 
+_cookies_file: Optional[str] = None
+
 
 class AudioDownloadError(Exception):
     pass
 
 
+def _get_cookies_path() -> Optional[str]:
+    """Decode YOUTUBE_COOKIES_B64 env var to a temp file (once) and return the path."""
+    global _cookies_file
+    if _cookies_file and Path(_cookies_file).exists():
+        return _cookies_file
+
+    cookies_b64 = os.getenv("YOUTUBE_COOKIES_B64")
+    if not cookies_b64:
+        return None
+
+    try:
+        content = base64.b64decode(cookies_b64).decode("utf-8")
+        path = Path(tempfile.gettempdir()) / "yt_cookies.txt"
+        path.write_text(content)
+        _cookies_file = str(path)
+        logger.info("YouTube cookies file written")
+        return _cookies_file
+    except Exception as e:
+        logger.warning(f"Failed to decode YOUTUBE_COOKIES_B64: {e}")
+        return None
+
+
 def get_ydl_opts(output_template: str) -> dict:
-    return {
+    opts = {
         'format': 'bestaudio/best',
         'outtmpl': output_template,
         'quiet': True,
@@ -30,6 +55,12 @@ def get_ydl_opts(output_template: str) -> dict:
         'retry_sleep_functions': {'http': lambda n: min(3 * n, 30)},
         'socket_timeout': 30,
     }
+
+    cookies_path = _get_cookies_path()
+    if cookies_path:
+        opts['cookiefile'] = cookies_path
+
+    return opts
 
 
 def validate_url(url: str) -> None:
