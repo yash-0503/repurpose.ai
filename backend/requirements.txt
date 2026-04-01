@@ -9,16 +9,15 @@ asyncpg==0.29.0
 
 # Auth / HTTP
 python-jose[cryptography]==3.3.0
-httpx==0.27.2
+httpx>=0.28.1,<1
 python-dotenv==1.0.1
 
 # Media
 yt-dlp==2024.12.23
 
-# AI / LLM
-llama-index==0.14.10
-llama-index-llms-google-genai==0.8.3
-llama-index-embeddings-google-genai==0.3.1
+# AI
+google-genai>=1.0.0
 
 # Transcription
 groq==1.1.2
+    
