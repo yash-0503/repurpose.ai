@@ -1,16 +1,15 @@
 import os
+import logging
 import asyncio
 from contextlib import asynccontextmanager
 from typing import Optional, List
 from datetime import datetime
-from uuid import UUID
 from pydantic import BaseModel
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
-from sqlalchemy.orm import selectinload
+from sqlalchemy import select
 
 from app.services.audio_downloader import download_audio as download_audio_service, AudioDownloadError, cleanup_audio_file
 from app.services.transcriber import transcribe_audio as transcribe_audio_service, TranscriptionError
@@ -27,6 +26,8 @@ from app.auth import (
     create_access_token,
     GOOGLE_CLIENT_ID
 )
+
+logger = logging.getLogger(__name__)
 
 # ============ Pydantic Models ============
 
@@ -111,14 +112,13 @@ async def lifespan(app: FastAPI):
     # Startup
     try:
         await init_db()
-        print("✅ Database initialized")
+        logger.info("Database initialized")
     except Exception as e:
-        print(f"⚠️ Database initialization skipped: {e}")
+        logger.warning(f"Database initialization skipped: {e}")
     
-    yield  # App runs here
+    yield
     
-    # Shutdown (if needed)
-    print("👋 Shutting down...")
+    logger.info("Shutting down...")
 
 # ============ FastAPI App ============
 
@@ -150,8 +150,6 @@ async def health_check():
 @app.get("/auth/google")
 async def google_auth(request: Request):
     """Initiate Google OAuth flow"""
-    from app.auth import GOOGLE_CLIENT_ID
-    
     if not GOOGLE_CLIENT_ID:
         raise HTTPException(
             status_code=500,
@@ -159,9 +157,7 @@ async def google_auth(request: Request):
         )
     
     redirect_uri = str(request.url_for("google_callback"))
-    print(f"🔐 OAuth redirect URI: {redirect_uri}")
     oauth_url = get_google_oauth_url(redirect_uri)
-    print(f"🔗 OAuth URL: {oauth_url[:100]}...")
     return {"auth_url": oauth_url}
 
 @app.get("/auth/callback")
@@ -344,7 +340,7 @@ async def download_audio(
 ):
     """Download audio from a YouTube URL to temporary storage (requires authentication)"""
     try:
-        print(f"📥 Downloading audio from: {request.url} (user: {user.email})")
+        logger.info(f"Downloading audio from: {request.url} (user: {user.email})")
         audio_path, title = await asyncio.to_thread(download_audio_service, request.url, use_temp=True)
         
         return DownloadResponse(
@@ -365,7 +361,7 @@ async def transcribe_audio(
 ):
     """Transcribe an audio file using Whisper and cleanup temp file (requires authentication)"""
     try:
-        print(f"🎙️ Transcribing audio: {request.audio_path} (user: {user.email})")
+        logger.info(f"Transcribing audio: {request.audio_path} (user: {user.email})")
         
         # Transcribe audio
         result = await asyncio.to_thread(transcribe_audio_service, request.audio_path)
@@ -391,9 +387,7 @@ async def analyze_writing_style(
 ):
     """Analyze writing style from reference text (requires authentication)"""
     try:
-        print(f"✍️ Analyzing writing style... (user: {user.email})")
-        
-        # Run in thread to avoid asyncio.run() conflict with FastAPI's event loop
+        logger.info(f"Analyzing writing style (user: {user.email})")
         style_guide = await asyncio.to_thread(analyze_style, request.reference_text)
         
         return StyleAnalyzeResponse(
@@ -414,12 +408,7 @@ async def generate_blog(
 ):
     """Generate content from transcript with platform-specific formatting (requires authentication)"""
     try:
-        format_label = {
-            "blog": "📝 Blog",
-            "linkedin": "💼 LinkedIn Post",
-            "twitter": "🐦 Twitter/X"
-        }.get(request.output_format, "📝 Blog")
-        print(f"{format_label} - Generating content...")
+        logger.info(f"Generating {request.output_format or 'blog'} content (user: {user.email})")
         
         if not request.transcript or len(request.transcript.strip()) < 50:
             raise HTTPException(
@@ -440,11 +429,10 @@ async def generate_blog(
             if saved_style:
                 style = saved_style.style_guide
                 style_id = saved_style.id
-                print(f"📌 Using saved style: {saved_style.name}")
+                logger.debug(f"Using saved style: {saved_style.name}")
         
         # Option 2: User provided custom text to analyze - analyze and save as "My Style"
         elif request.style_guide and len(request.style_guide.strip()) >= 100:
-            print("✍️ Analyzing custom style text...")
             analyzed_style = await asyncio.to_thread(analyze_style, request.style_guide)
             style = analyzed_style
             
@@ -459,7 +447,6 @@ async def generate_blog(
                 # Update existing style
                 existing_style.style_guide = analyzed_style
                 style_id = existing_style.id
-                print("🔄 Updated existing 'My Style'")
             else:
                 # Create new style
                 new_style = Style(
@@ -470,7 +457,6 @@ async def generate_blog(
                 db.add(new_style)
                 await db.flush()
                 style_id = new_style.id
-                print("✨ Saved new 'My Style'")
         
         # Run in thread to avoid asyncio.run() conflict with FastAPI's event loop
         blog_content = await asyncio.to_thread(
@@ -493,7 +479,7 @@ async def generate_blog(
         await db.commit()
         await db.refresh(blog)
         blog_id = str(blog.id)
-        print(f"💾 Blog auto-saved with ID: {blog_id}")
+        logger.info(f"Blog saved: {blog_id}")
         
         return GenerateBlogResponse(
             status="success",
@@ -503,6 +489,5 @@ async def generate_blog(
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        logger.exception("Blog generation failed")
         raise HTTPException(status_code=500, detail=f"Blog generation failed: {str(e)}")
