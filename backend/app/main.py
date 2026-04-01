@@ -130,9 +130,13 @@ app = FastAPI(
 )
 
 # CORS middleware for React frontend
+ALLOWED_ORIGINS = os.getenv(
+    "ALLOWED_ORIGINS",
+    "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173"
+).split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -181,8 +185,8 @@ async def google_callback(
     # Create JWT token
     access_token = create_access_token({"sub": str(user.id)})
     
-    # Redirect to frontend with token (use path that won't be proxied)
-    frontend_url = f"http://localhost:5173/?token={access_token}"
+    FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    frontend_url = f"{FRONTEND_URL}/?token={access_token}"
     return RedirectResponse(url=frontend_url)
 
 @app.get("/auth/me", response_model=UserResponse)

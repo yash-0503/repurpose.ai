@@ -1,5 +1,6 @@
-const API_BASE = '/api';
-const AUTH_BASE = '/auth';
+const BACKEND_URL = import.meta.env.VITE_API_URL || '';
+const API_BASE = `${BACKEND_URL}/api`;
+const AUTH_BASE = `${BACKEND_URL}/auth`;
 
 // Helper to get auth headers
 function getAuthHeaders(token) {
