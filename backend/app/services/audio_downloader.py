@@ -45,7 +45,7 @@ def _get_cookies_path() -> Optional[str]:
 
 def get_ydl_opts(output_template: str) -> dict:
     opts = {
-        'format': 'bestaudio/best',
+        'format': 'bestaudio*/best',
         'outtmpl': output_template,
         'quiet': True,
         'no_warnings': True,
