@@ -5,7 +5,7 @@ python-multipart==0.0.10
 
 # DB
 sqlalchemy==2.0.35
-asyncpg==0.29.0
+asyncpg==0.31.0
 
 # Auth / HTTP
 python-jose[cryptography]==3.3.0
