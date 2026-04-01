@@ -2,36 +2,20 @@ import os
 import logging
 from typing import Dict, Optional
 from pathlib import Path
-import whisper
 from dotenv import load_dotenv
+from groq import Groq
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_MODEL = os.getenv("GROQ_WHISPER_MODEL","whisper-large-v3-turbo")
 MAX_AUDIO_SIZE_MB = int(os.getenv("MAX_AUDIO_SIZE_MB", "100"))
-
-_model_cache: Optional[whisper.Whisper] = None
 
 
 class TranscriptionError(Exception):
     pass
-
-
-def get_model(model_name: str = WHISPER_MODEL) -> whisper.Whisper:
-    global _model_cache
-    
-    if _model_cache is None:
-        logger.info(f"Loading Whisper model: {model_name}")
-        try:
-            _model_cache = whisper.load_model(model_name)
-            logger.info(f"Whisper model '{model_name}' loaded successfully")
-        except Exception as e:
-            logger.error(f"Failed to load Whisper model: {e}")
-            raise TranscriptionError(f"Model loading failed: {str(e)}")
-    
-    return _model_cache
 
 
 def validate_audio_file(filepath: str) -> Path:
@@ -61,7 +45,7 @@ def validate_audio_file(filepath: str) -> Path:
 
 def transcribe_audio(
     filepath: str,
-    model_name: str = WHISPER_MODEL,
+    model_name: str = GROQ_MODEL,
     language: Optional[str] = None,
     task: str = "transcribe"
 ) -> Dict[str, any]:
@@ -69,29 +53,32 @@ def transcribe_audio(
         audio_path = validate_audio_file(filepath)
         
         logger.info(f"Transcribing: {audio_path.name}")
+
+        if not GROQ_API_KEY:
+            raise TranscriptionError("Groq Api Key not configured")
         
-        model = get_model(model_name)
+        client = Groq(api_key=GROQ_API_KEY)
+        with open(audio_path, "rb") as audio_file:
+             response = client.audio.transcriptions.create(
+                file=audio_file,
+                model=model_name,
+                language=language or "",
+                response_format="verbose_json",
+                timestamp_granularities=["segment"],
+            )
         
-        options = {
-            'fp16': False,
-            'task': task,
-        }
-        
-        if language:
-            options['language'] = language
-        
-        result = model.transcribe(str(audio_path), **options)
+        segments = getattr(response,"segments",[]) or []
+        duration = segments[-1].get("end",0) if segments else 0.0
         
         output = {
-            'text': result.get('text', '').strip(),
-            'language': result.get('language', 'unknown'),
-            'segments': result.get('segments', []),
-            'duration': sum(seg.get('end', 0) for seg in result.get('segments', [])),
+            'text': response.text.strip(),
+            'language': getattr(response,"language","unknown"),
+            'segments': segments,
+            'duration': duration,
         }
         
         logger.info(
             f"Transcription complete: {len(output['text'])} chars, "
-            f"{len(output['segments'])} segments, "
             f"language: {output['language']}"
         )
         
@@ -102,58 +89,3 @@ def transcribe_audio(
     except Exception as e:
         logger.error(f"Transcription failed: {e}")
         raise TranscriptionError(f"Failed to transcribe audio: {str(e)}")
-
-
-def get_transcript_text(filepath: str, **kwargs) -> str:
-    result = transcribe_audio(filepath, **kwargs)
-    return result['text']
-
-
-def simple_transcribe(filepath: str) -> dict:
-    logger.warning("Using legacy simple_transcribe function. Consider using transcribe_audio().")
-    
-    try:
-        if not os.path.exists(filepath):
-            raise FileNotFoundError(f"File path doesn't exist: {filepath}")
-        
-        logger.info(f"Transcribing the video at {filepath}")
-        model = get_model()
-        result = model.transcribe(filepath, fp16=False)
-        return result
-        
-    except Exception as e:
-        logger.error(f"Legacy transcription failed: {e}")
-        raise
-
-
-if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    print("Testing audio transcriber...")
-    print(f"Whisper model: {WHISPER_MODEL}\n")
-    
-    test_file = "downloads/test_audio.mp3"
-    
-    if not os.path.exists(test_file):
-        print(f"❌ Test file not found: {test_file}")
-        print("Create a test audio file or update the path above.\n")
-    else:
-        print(f"Testing with: {test_file}\n")
-        
-        try:
-            print("1. Full transcription...")
-            result = transcribe_audio(test_file)
-            print(f"✅ Language: {result['language']}")
-            print(f"✅ Duration: {result['duration']:.1f}s")
-            print(f"✅ Segments: {len(result['segments'])}")
-            print(f"✅ Text preview: {result['text'][:100]}...\n")
-            
-            print("2. Simple text extraction...")
-            text = get_transcript_text(test_file)
-            print(f"✅ Text length: {len(text)} characters\n")
-            
-        except TranscriptionError as e:
-            print(f"❌ Failed: {e}\n")
