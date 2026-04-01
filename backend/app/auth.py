@@ -1,4 +1,5 @@
 import os
+import logging
 from datetime import datetime, timedelta
 from typing import Optional
 from dotenv import load_dotenv
@@ -12,6 +13,8 @@ import httpx
 from app.database import get_db, User
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 # Configuration
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
@@ -57,9 +60,12 @@ async def get_google_tokens(code: str, redirect_uri: str) -> dict:
             },
         )
         if response.status_code != 200:
+            error_body = response.text
+            logger.error(f"Google token exchange failed ({response.status_code}): {error_body}")
+            logger.error(f"redirect_uri used: {redirect_uri}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to get tokens from Google"
+                detail=f"Failed to get tokens from Google: {error_body}"
             )
         return response.json()
 

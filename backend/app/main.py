@@ -109,7 +109,11 @@ class BlogResponse(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown events"""
-    # Startup
+    required_vars = ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "JWT_SECRET", "NEON_DATABASE_URL", "FRONTEND_URL"]
+    missing = [v for v in required_vars if not os.getenv(v)]
+    if missing:
+        logger.warning(f"Missing environment variables: {', '.join(missing)}")
+    
     try:
         await init_db()
         logger.info("Database initialized")
@@ -171,23 +175,27 @@ async def google_callback(
     db: AsyncSession = Depends(get_db)
 ):
     """Handle Google OAuth callback"""
-    redirect_uri = str(request.url_for("google_callback"))
-    
-    # Exchange code for tokens
-    tokens = await get_google_tokens(code, redirect_uri)
-    
-    # Get user info from Google
-    google_user = await get_google_user_info(tokens["access_token"])
-    
-    # Create or update user in database
-    user = await get_or_create_user(db, google_user)
-    
-    # Create JWT token
-    access_token = create_access_token({"sub": str(user.id)})
-    
-    FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
-    frontend_url = f"{FRONTEND_URL}/?token={access_token}"
-    return RedirectResponse(url=frontend_url)
+    try:
+        redirect_uri = str(request.url_for("google_callback"))
+        logger.info(f"OAuth callback - redirect_uri: {redirect_uri}")
+        
+        tokens = await get_google_tokens(code, redirect_uri)
+        
+        google_user = await get_google_user_info(tokens["access_token"])
+        logger.info(f"OAuth callback - user: {google_user.get('email')}")
+        
+        user = await get_or_create_user(db, google_user)
+        
+        access_token = create_access_token({"sub": str(user.id)})
+        
+        FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+        frontend_url = f"{FRONTEND_URL}/?token={access_token}"
+        return RedirectResponse(url=frontend_url)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("OAuth callback failed")
+        raise HTTPException(status_code=500, detail=f"Authentication failed: {str(e)}")
 
 @app.get("/auth/me", response_model=UserResponse)
 async def get_me(user: User = Depends(get_current_user_required)):
