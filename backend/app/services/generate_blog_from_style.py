@@ -1,8 +1,11 @@
 import os
+import logging
 from dotenv import load_dotenv
 from llama_index.core import Document, VectorStoreIndex, Settings
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 _llm_initialized = False
 
@@ -18,13 +21,13 @@ def ensure_llm_initialized():
         key = os.getenv("GEMINI_API_KEY")
         if key:
             Settings.llm = GoogleGenAI(model="gemini-2.5-flash", api_key=key)
-            Settings.embed_model = GoogleGenAIEmbedding(model_name="text-embedding-004", api_key=key)
+            Settings.embed_model = GoogleGenAIEmbedding(model_name="gemini-embedding-001", api_key=key)
             _llm_initialized = True
-            print("✅ Gemini LLM initialized")
+            logger.info("Gemini LLM initialized")
         else:
-            print("⚠️ GEMINI_API_KEY not found in .env. LLM will not be initialized.")
+            logger.warning("GEMINI_API_KEY not found in .env")
     except Exception as e:
-        print(f"⚠️ LLM initialization deferred: {e}")
+        logger.error(f"LLM initialization failed: {e}")
 
 
 def get_blog_prompt(style_guide: str = None) -> str:
@@ -112,7 +115,7 @@ def generate_blog_from_transcript(
     output_format: str = "blog",
     output_option: str = None
 ) -> str:
-    print(f"Generating {output_format} content...")
+    logger.info(f"Generating {output_format} content")
     ensure_llm_initialized()
     
     if not Settings.llm:
@@ -132,5 +135,5 @@ def generate_blog_from_transcript(
         prompt = get_blog_prompt(style_guide)
 
     response = query_engine.query(prompt)
-    print("Gemini has finished writing.")
+    logger.info("Content generation complete")
     return str(response)

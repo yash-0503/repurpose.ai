@@ -1,6 +1,5 @@
 import os
 import logging
-from typing import Optional
 from dotenv import load_dotenv
 from llama_index.core import Settings
 
@@ -37,7 +36,7 @@ def ensure_llm_initialized() -> None:
         
         Settings.llm = GoogleGenAI(model="gemini-2.5-flash", api_key=api_key)
         Settings.embed_model = GoogleGenAIEmbedding(
-            model_name="text-embedding-004",
+            model_name="gemini-embedding-001",
             api_key=api_key
         )
         
@@ -116,76 +115,3 @@ def analyze_style(reference_text: str) -> str:
     except Exception as e:
         logger.error(f"Style analysis failed: {e}")
         raise StyleAnalysisError(f"Failed to analyze writing style: {str(e)}")
-
-
-def quick_style_check(reference_text: str) -> dict:
-    try:
-        cleaned = validate_reference_text(reference_text)
-        
-        words = cleaned.split()
-        sentences = cleaned.count('.') + cleaned.count('!') + cleaned.count('?')
-        paragraphs = len([p for p in cleaned.split('\n\n') if p.strip()])
-        
-        metrics = {
-            'word_count': len(words),
-            'sentence_count': max(sentences, 1),
-            'paragraph_count': max(paragraphs, 1),
-            'avg_words_per_sentence': len(words) / max(sentences, 1),
-            'avg_word_length': sum(len(w) for w in words) / max(len(words), 1),
-        }
-        
-        style_guide = analyze_style(reference_text)
-        
-        return {
-            'style_guide': style_guide,
-            'metrics': metrics
-        }
-        
-    except Exception as e:
-        logger.error(f"Quick style check failed: {e}")
-        raise StyleAnalysisError(f"Style check failed: {str(e)}")
-
-
-if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    print("Testing style analyzer...")
-    print(f"Min text length: {MIN_REFERENCE_LENGTH} chars")
-    print(f"Max text length: {MAX_REFERENCE_LENGTH} chars\n")
-    
-    sample_text = """
-    Hey there! Welcome to my blog where I share cool coding tips and tricks.
-    I like to keep things simple and fun. No boring technical jargon here!
-    
-    Today, we're diving into Python. It's awesome! 🐍
-    
-    Here's what you'll learn:
-    • How to write clean code
-    • Why readability matters
-    • Some neat shortcuts
-    
-    Let's get started! Ready? Let's go!
-    """
-    
-    print("Sample text:")
-    print(sample_text)
-    print("\n" + "="*50 + "\n")
-    
-    try:
-        print("Analyzing style...\n")
-        style_guide = analyze_style(sample_text)
-        print("STYLE GUIDE:")
-        print(style_guide)
-        print("\n" + "="*50 + "\n")
-        
-        print("Quick style check...\n")
-        result = quick_style_check(sample_text)
-        print("METRICS:")
-        for key, value in result['metrics'].items():
-            print(f"  {key}: {value:.2f}")
-        
-    except StyleAnalysisError as e:
-        print(f"❌ Failed: {e}")
