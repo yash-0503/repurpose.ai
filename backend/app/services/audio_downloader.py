@@ -1,131 +1,130 @@
-import yt_dlp
-import os
+import re
 import logging
-import tempfile
-import base64
-from typing import Tuple, Optional
-from pathlib import Path
-from dotenv import load_dotenv
+import httpx
+from typing import Dict
+from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api._errors import (
+    TranscriptsDisabled,
+    NoTranscriptFound,
+    VideoUnavailable,
+)
 
-load_dotenv()
-
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-DOWNLOAD_DIR = Path(os.getenv("DOWNLOAD_DIR", "downloads"))
-MAX_FILE_SIZE_MB = int(os.getenv("MAX_AUDIO_SIZE_MB", "100"))
 
-_cookies_file: Optional[str] = None
-
-
-class AudioDownloadError(Exception):
+class TranscriptFetchError(Exception):
     pass
-
-
-def _get_cookies_path() -> Optional[str]:
-    """Decode YOUTUBE_COOKIES_B64 env var to a temp file (once) and return the path."""
-    global _cookies_file
-    if _cookies_file and Path(_cookies_file).exists():
-        return _cookies_file
-
-    cookies_b64 = os.getenv("YOUTUBE_COOKIES_B64")
-    if not cookies_b64:
-        return None
-
-    try:
-        content = base64.b64decode(cookies_b64).decode("utf-8")
-        path = Path(tempfile.gettempdir()) / "yt_cookies.txt"
-        path.write_text(content)
-        _cookies_file = str(path)
-        logger.info("YouTube cookies file written")
-        return _cookies_file
-    except Exception as e:
-        logger.warning(f"Failed to decode YOUTUBE_COOKIES_B64: {e}")
-        return None
-
-
-def get_ydl_opts(output_template: str) -> dict:
-    opts = {
-        'format': 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio*/best',
-        'outtmpl': output_template,
-        'quiet': False,
-        'no_warnings': False,
-        'verbose': True,
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        'extractor_retries': 3,
-        'fragment_retries': 10,
-        'retry_sleep_functions': {'http': lambda n: min(3 * n, 30)},
-        'socket_timeout': 30,
-    }
-
-    cookies_path = _get_cookies_path()
-    if cookies_path:
-        opts['cookiefile'] = cookies_path
-
-    return opts
 
 
 def validate_url(url: str) -> None:
     if not url or not isinstance(url, str):
         raise ValueError("URL must be a non-empty string")
-    
+
     valid_domains = ['youtube.com', 'youtu.be', 'm.youtube.com']
     if not any(domain in url.lower() for domain in valid_domains):
         raise ValueError("Invalid YouTube URL")
 
 
-def download_audio(url: str, use_temp: bool = True) -> Tuple[str, str]:
+def extract_video_id(url: str) -> str:
+    """Extract the video ID from various YouTube URL formats."""
+    patterns = [
+        r'(?:v=|/v/|youtu\.be/)([a-zA-Z0-9_-]{11})',
+        r'(?:embed/)([a-zA-Z0-9_-]{11})',
+        r'(?:shorts/)([a-zA-Z0-9_-]{11})',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+    raise TranscriptFetchError(f"Could not extract video ID from URL: {url}")
+
+
+def _fetch_title(url: str) -> str:
+    """Fetch video title via YouTube oEmbed (no auth required)."""
+    try:
+        resp = httpx.get(
+            "https://www.youtube.com/oembed",
+            params={"url": url, "format": "json"},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            return resp.json().get("title", "Unknown")
+    except Exception as e:
+        logger.warning(f"Failed to fetch title via oEmbed: {e}")
+    return "Unknown"
+
+
+def _fetch_best_transcript(video_id: str):
+    """List all available transcripts and pick the best one.
+
+    Priority: manual English > auto English > manual any > auto any.
+    """
+    ytt_api = YouTubeTranscriptApi()
+    transcript_list = ytt_api.list(video_id)
+
+    manual = []
+    generated = []
+    for t in transcript_list:
+        (manual if not t.is_generated else generated).append(t)
+
+    for group_label, group in [("manual", manual), ("auto-generated", generated)]:
+        for t in group:
+            if t.language_code.startswith("en"):
+                logger.info(f"Selected {group_label} English transcript ({t.language_code})")
+                return t.fetch()
+
+    for group_label, group in [("manual", manual), ("auto-generated", generated)]:
+        if group:
+            t = group[0]
+            logger.info(f"Selected {group_label} transcript: {t.language} ({t.language_code})")
+            return t.fetch()
+
+    raise NoTranscriptFound(video_id, [], [])
+
+
+def fetch_transcript(url: str) -> Dict[str, str]:
+    """Fetch transcript for a YouTube video using captions/subtitles.
+
+    Returns dict with keys: text, title, language
+    """
     try:
         validate_url(url)
-        
-        if use_temp:
-            output_dir = Path(tempfile.mkdtemp(prefix="repurpose_audio_"))
-        else:
-            output_dir = DOWNLOAD_DIR
-            output_dir.mkdir(parents=True, exist_ok=True)
-        
-        output_template = str(output_dir / "%(title)s.%(ext)s")
-        ydl_opts = get_ydl_opts(output_template)
-        
-        logger.info(f"Downloading audio from: {url}")
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            
-            if info.get('filesize', 0) > MAX_FILE_SIZE_MB * 1024 * 1024:
-                logger.warning(f"File size ({info.get('filesize')} bytes) exceeds limit")
-            
-            title = info.get('title', 'Unknown')
-            filename = ydl.prepare_filename(info)
-            audio_path = Path(filename)
-            
-            if not audio_path.exists():
-                 for f in audio_path.parent.iterdir():
-                    if f.stem == audio_path.stem:
-                        audio_path = f
-                        break
-            
-            logger.info(f"Successfully downloaded: {title}")
-            return str(audio_path), title
-            
-    except yt_dlp.utils.DownloadError as e:
-        logger.error(f"yt-dlp download error: {e}")
-        raise AudioDownloadError(f"Failed to download video: {str(e)}")
-    
-    except Exception as e:
-        logger.error(f"Unexpected error during download: {e}")
-        raise AudioDownloadError(f"Download failed: {str(e)}")
+        video_id = extract_video_id(url)
 
+        logger.info(f"Fetching transcript for video: {video_id}")
 
-def cleanup_audio_file(file_path: str) -> None:
-    try:
-        path = Path(file_path)
-        if path.exists():
-            path.unlink()
-            logger.debug(f"Deleted audio file: {file_path}")
-            
-            if 'repurpose_audio_' in str(path.parent):
-                if path.parent.exists() and not list(path.parent.iterdir()):
-                    path.parent.rmdir()
-                    logger.debug(f"Deleted temp directory: {path.parent}")
+        transcript = _fetch_best_transcript(video_id)
+
+        text = " ".join(snippet.text for snippet in transcript)
+
+        if not text or len(text.strip()) < 10:
+            raise TranscriptFetchError("Transcript is empty or too short")
+
+        title = _fetch_title(url)
+        language = transcript.language_code if hasattr(transcript, 'language_code') else "auto"
+
+        logger.info(
+            f"Transcript fetched: {len(text)} chars, "
+            f"language={language}, title={title}"
+        )
+
+        return {"text": text, "title": title, "language": language}
+
+    except TranscriptsDisabled:
+        raise TranscriptFetchError(
+            "Transcripts are disabled for this video. Try a different video."
+        )
+    except NoTranscriptFound:
+        raise TranscriptFetchError(
+            "No captions found for this video. Try a video with subtitles enabled."
+        )
+    except VideoUnavailable:
+        raise TranscriptFetchError(
+            "This video is unavailable or private."
+        )
+    except TranscriptFetchError:
+        raise
     except Exception as e:
-        logger.warning(f"Failed to cleanup audio file {file_path}: {e}")
+        logger.error(f"Unexpected error fetching transcript: {e}")
+        raise TranscriptFetchError(f"Failed to fetch transcript: {str(e)}")

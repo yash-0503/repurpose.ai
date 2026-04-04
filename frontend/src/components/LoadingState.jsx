@@ -1,7 +1,6 @@
 export default function LoadingState({ currentStage, error }) {
   const stages = [
-    { id: 'download', label: 'Downloading audio from YouTube', icon: '📥' },
-    { id: 'transcribe', label: 'Transcribing with Whisper AI', icon: '🎙️' },
+    { id: 'transcript', label: 'Fetching transcript from YouTube', icon: '📄' },
     { id: 'style', label: 'Analyzing writing style', icon: '✍️' },
     { id: 'generate', label: 'Generating blog post', icon: '📝' },
   ];

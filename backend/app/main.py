@@ -11,8 +11,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.services.audio_downloader import download_audio as download_audio_service, AudioDownloadError, cleanup_audio_file
-from app.services.transcriber import transcribe_audio as transcribe_audio_service, TranscriptionError
+from app.services.audio_downloader import fetch_transcript as fetch_transcript_service, TranscriptFetchError
 from app.services.style_analyzer import analyze_style, StyleAnalysisError
 from app.services.generate_blog_from_style import generate_blog_from_transcript
 from app.database import get_db, User, Style, Blog, init_db
@@ -31,21 +30,14 @@ logger = logging.getLogger(__name__)
 
 # ============ Pydantic Models ============
 
-class DownloadRequest(BaseModel):
+class TranscriptRequest(BaseModel):
     url: str
 
-class DownloadResponse(BaseModel):
+class TranscriptResponse(BaseModel):
     status: str
-    audio_path: str
-    title: str
-
-class TranscribeRequest(BaseModel):
-    audio_path: str
-
-class TranscribeResponse(BaseModel):
-    status: str
-    language: str
     text: str
+    title: str
+    language: str
 
 class StyleAnalyzeRequest(BaseModel):
     reference_text: str
@@ -345,51 +337,26 @@ async def delete_blog(
 
 # ============ Core Endpoints ============
 
-@app.post("/api/download", response_model=DownloadResponse)
-async def download_audio(
-    request: DownloadRequest,
+@app.post("/api/transcript", response_model=TranscriptResponse)
+async def get_transcript(
+    request: TranscriptRequest,
     user: User = Depends(get_current_user_required)
 ):
-    """Download audio from a YouTube URL to temporary storage (requires authentication)"""
+    """Fetch transcript from a YouTube video using captions (requires authentication)"""
     try:
-        logger.info(f"Downloading audio from: {request.url} (user: {user.email})")
-        audio_path, title = await asyncio.to_thread(download_audio_service, request.url, use_temp=True)
-        
-        return DownloadResponse(
+        logger.info(f"Fetching transcript for: {request.url} (user: {user.email})")
+        result = await asyncio.to_thread(fetch_transcript_service, request.url)
+
+        return TranscriptResponse(
             status="success",
-            audio_path=audio_path,
-            title=title
+            text=result["text"],
+            title=result["title"],
+            language=result["language"],
         )
-    except AudioDownloadError as e:
+    except TranscriptFetchError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
-
-
-@app.post("/api/transcribe", response_model=TranscribeResponse)
-async def transcribe_audio(
-    request: TranscribeRequest,
-    user: User = Depends(get_current_user_required)
-):
-    """Transcribe an audio file using Whisper and cleanup temp file (requires authentication)"""
-    try:
-        logger.info(f"Transcribing audio: {request.audio_path} (user: {user.email})")
-        
-        # Transcribe audio
-        result = await asyncio.to_thread(transcribe_audio_service, request.audio_path)
-        
-        # Cleanup temp file after transcription
-        cleanup_audio_file(request.audio_path)
-        
-        return TranscribeResponse(
-            status="success",
-            language=result.get('language', 'unknown'),
-            text=result['text']
-        )
-    except TranscriptionError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Transcript fetch failed: {str(e)}")
 
 
 @app.post("/api/analyze-style", response_model=StyleAnalyzeResponse)
@@ -476,7 +443,8 @@ async def generate_blog(
             request.transcript, 
             style,
             request.output_format or "blog",
-            request.output_option
+            request.output_option,
+            request.youtube_url,
         )
         
         # Auto-save blog (user is always authenticated now)

@@ -16,9 +16,9 @@ const OUTPUT_FORMATS = {
     description: 'Professional, story-driven, engaging',
     length: 'Customizable',
     subOptions: [
-      { id: 'short', label: 'Short', desc: '200-400 words' },
-      { id: 'medium', label: 'Medium', desc: '400-700 words' },
-      { id: 'long', label: 'Long', desc: '700-1000 words' }
+      { id: 'short', label: 'Short', desc: '100-200 words' },
+      { id: 'medium', label: 'Medium', desc: '200-400 words' },
+      { id: 'long', label: 'Long', desc: '500 words' }
     ]
   },
   twitter: {

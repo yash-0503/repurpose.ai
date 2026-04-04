@@ -7,7 +7,7 @@ import BlogOutput from './components/BlogOutput';
 import AuthButton from './components/AuthButton';
 import UserMenu from './components/UserMenu';
 import BlogHistory from './components/BlogHistory';
-import { downloadAudio, transcribeAudio, generateBlog } from './api/repurpose';
+import { getTranscript, generateBlog } from './api/repurpose';
 
 function AppContent() {
   const { user, token, loading: authLoading } = useAuth();
@@ -36,25 +36,20 @@ function AppContent() {
     setCurrentUrl(url);
     
     try {
-      // Stage 1: Download audio
-      setCurrentStage('download');
-      const downloadResult = await downloadAudio(token, url);
-      console.log('Download complete:', downloadResult);
-      setCurrentTitle(downloadResult.title);
+      // Stage 1: Fetch transcript from YouTube captions
+      setCurrentStage('transcript');
+      const transcriptResult = await getTranscript(token, url);
+      console.log('Transcript fetched:', transcriptResult);
+      setCurrentTitle(transcriptResult.title);
 
-      // Stage 2: Transcribe audio
-      setCurrentStage('transcribe');
-      const transcribeResult = await transcribeAudio(token, downloadResult.audio_path);
-      console.log('Transcription complete:', transcribeResult);
-
-      // Stage 3: Generate content (style analysis happens in backend if needed)
+      // Stage 2: Generate content (style analysis happens in backend if needed)
       setCurrentStage('generate');
       const blogResult = await generateBlog(token, {
-        transcript: transcribeResult.text,
+        transcript: transcriptResult.text,
         styleGuide: style,
         styleId: styleId,
         youtubeUrl: url,
-        title: downloadResult.title,
+        title: transcriptResult.title,
         outputFormat: format.format,
         outputOption: format.option
       });

@@ -21,17 +21,41 @@ def get_client() -> genai.Client:
     return _client
 
 
-def get_blog_prompt(style_guide: str = None) -> str:
-    base_prompt = """You are an expert technical writer. Convert the following video transcript into a well-structured blog post in Markdown format.
+ADAPTIVE_PREAMBLE = """STEP 1 — Detect content type:
+Read the transcript and determine what kind of video this is (e.g. educational tutorial, podcast conversation, product announcement, motivational talk, interview, news commentary, coding walkthrough, review, vlog, etc.).
+
+STEP 2 — Adapt your structure to match:
+- Educational/tutorial → focus on the lesson, key concepts, and practical takeaways
+- Podcast/interview → pull out the best insights, stories, and memorable quotes
+- Announcement/launch → build hype, highlight what's new, and why it matters
+- Motivational/storytelling → capture the emotional arc and the core message
+- Technical/coding → distill the approach, tradeoffs, and what the viewer will learn
+- Any other type → use your judgment to pick the most engaging angle
+
+STEP 3 — Write in a storytelling voice:
+- Short, punchy sentences. Line break after every sentence.
+- Simple, conversational language. No corporate jargon.
+- Personal and real — write like a human, not a press release.
+- Strong emotional hook as the opening line.
+"""
+
+
+def get_blog_prompt(style_guide: str = None, youtube_url: str = None) -> str:
+    cta = ""
+    if youtube_url:
+        cta = f"\n- End with: 🎬 Watch the full video here: {youtube_url}\n"
+
+    base_prompt = f"""{ADAPTIVE_PREAMBLE}
+Now convert the transcript into a well-structured BLOG POST in Markdown.
 
 Requirements:
-- Use proper Markdown headers (##, ###)
-- Include a compelling introduction
-- Break content into clear sections
-- Add a "Key Takeaways" section at the end
-- Write in a professional but easy-to-read tone
+- Use Markdown headers (##, ###) to break into clear sections
+- Compelling introduction that hooks the reader
+- Adapt section structure to the content type you detected
+- Add a "Key Takeaways" bullet list near the end
+- Professional but easy-to-read tone
 - Make it engaging and informative
-"""
+{cta}"""
 
     if style_guide:
         base_prompt += f"\n**IMPORTANT**: Write in this specific style:\n{style_guide}\n"
@@ -39,30 +63,32 @@ Requirements:
     return base_prompt
 
 
-def get_linkedin_prompt(style_guide: str = None, length: str = None) -> str:
+def get_linkedin_prompt(style_guide: str = None, length: str = None, youtube_url: str = None) -> str:
+    cta = ""
+    if youtube_url:
+        cta = f"\n- End with a call-to-action:\n  🎬 Want to learn more? Watch the full video: {youtube_url}\n"
+
     if length == "short":
-        base_prompt = """Convert this video transcript into a SHORT LinkedIn post (300-500 words).
+        base_prompt = f"""{ADAPTIVE_PREAMBLE}
+Now convert the transcript into a SHORT LinkedIn post.
 
 Requirements:
-- Start with a strong hook
-- Maximum 500 words
-- 3-5 key points only
-- Include relevant emojis
-- End with a question or call-to-action
-- Professional yet conversational tone
-"""
+- 120-180 words ONLY, do NOT exceed 180 words
+- Adapt the narrative structure to the content type you detected
+- Use bullet points where they help readability
+- Keep it personal and real
+{cta}"""
     else:
-        base_prompt = """Convert this video transcript into a LONG-FORM LinkedIn post (800-1200 words).
+        base_prompt = f"""{ADAPTIVE_PREAMBLE}
+Now convert the transcript into a LONG-FORM LinkedIn post.
 
 Requirements:
-- Start with a compelling hook
-- Tell a story or share insights
-- Break into digestible paragraphs
-- Use line breaks for readability
-- Include relevant emojis (but not too many)
-- End with a thought-provoking question
-- Professional yet personal tone
-"""
+- 400-600 words
+- Adapt the narrative structure to the content type you detected
+- Use bullet points where they help readability
+- Go deeper on the ideas — add personal perspective and reflection
+- Keep it personal and real
+{cta}"""
 
     if style_guide:
         base_prompt += f"\n**IMPORTANT**: Write in this specific style:\n{style_guide}\n"
@@ -70,27 +96,32 @@ Requirements:
     return base_prompt
 
 
-def get_twitter_prompt(style_guide: str = None, thread_type: str = None) -> str:
+def get_twitter_prompt(style_guide: str = None, thread_type: str = None, youtube_url: str = None) -> str:
+    cta = ""
+    if youtube_url:
+        cta = f"\n- Include the video link in the last tweet: {youtube_url}\n"
+
     if thread_type == "thread":
-        base_prompt = """Convert this video transcript into a Twitter THREAD.
+        base_prompt = f"""{ADAPTIVE_PREAMBLE}
+Now convert the transcript into a Twitter/X THREAD.
 
 Requirements:
 - First tweet: Strong hook (under 280 chars)
-- Break into 5-10 tweets
-- Each tweet under 280 characters
+- 5-10 tweets, each under 280 characters
 - Number tweets (1/, 2/, etc.)
-- Use simple language
-- Include relevant emojis
-- Last tweet: Call-to-action or summary
-"""
+- Adapt the thread flow to the content type you detected
+- Simple language, relevant emojis
+- Last tweet: summary or call-to-action
+{cta}"""
     else:
-        base_prompt = """Convert this video transcript into a SINGLE Twitter post.
+        base_prompt = f"""{ADAPTIVE_PREAMBLE}
+Now convert the transcript into a SINGLE tweet.
 
 Requirements:
 - Maximum 280 characters
-- Capture the main insight
-- Use punchy, engaging language
-- Include 1-2 relevant emojis
+- Capture the single most powerful insight
+- Punchy, engaging language
+- 1-2 relevant emojis
 - Make every word count
 """
 
@@ -104,19 +135,20 @@ def generate_blog_from_transcript(
     transcription: str,
     style_guide: str = None,
     output_format: str = "blog",
-    output_option: str = None
+    output_option: str = None,
+    youtube_url: str = None,
 ) -> str:
     logger.info(f"Generating {output_format} content")
     client = get_client()
 
     if output_format == "blog":
-        prompt = get_blog_prompt(style_guide)
+        prompt = get_blog_prompt(style_guide, youtube_url)
     elif output_format == "linkedin":
-        prompt = get_linkedin_prompt(style_guide, output_option)
+        prompt = get_linkedin_prompt(style_guide, output_option, youtube_url)
     elif output_format == "twitter":
-        prompt = get_twitter_prompt(style_guide, output_option)
+        prompt = get_twitter_prompt(style_guide, output_option, youtube_url)
     else:
-        prompt = get_blog_prompt(style_guide)
+        prompt = get_blog_prompt(style_guide, youtube_url)
 
     full_prompt = f"{prompt}\n\n--- TRANSCRIPT ---\n{transcription}\n--- END TRANSCRIPT ---"
 

@@ -104,28 +104,15 @@ export async function deleteBlog(token, blogId) {
 
 // ============ Core Features ============
 
-export async function downloadAudio(token, url) {
-  const response = await fetch(`${API_BASE}/download`, {
+export async function getTranscript(token, url) {
+  const response = await fetch(`${API_BASE}/transcript`, {
     method: 'POST',
     headers: getAuthHeaders(token),
     body: JSON.stringify({ url }),
   });
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(error.detail || 'Download failed');
-  }
-  return response.json();
-}
-
-export async function transcribeAudio(token, audioPath) {
-  const response = await fetch(`${API_BASE}/transcribe`, {
-    method: 'POST',
-    headers: getAuthHeaders(token),
-    body: JSON.stringify({ audio_path: audioPath }),
-  });
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || 'Transcription failed');
+    throw new Error(error.detail || 'Failed to fetch transcript');
   }
   return response.json();
 }
