@@ -1,3 +1,4 @@
+import os
 import re
 import logging
 import httpx
@@ -8,9 +9,15 @@ from youtube_transcript_api._errors import (
     NoTranscriptFound,
     VideoUnavailable,
 )
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+WEBSHARE_USERNAME = os.getenv("WEBSHARE_PROXY_USERNAME")
+WEBSHARE_PASSWORD = os.getenv("WEBSHARE_PROXY_PASSWORD")
 
 
 class TranscriptFetchError(Exception):
@@ -55,12 +62,26 @@ def _fetch_title(url: str) -> str:
     return "Unknown"
 
 
+def _get_ytt_api() -> YouTubeTranscriptApi:
+    """Create a YouTubeTranscriptApi instance, with Webshare proxy if configured."""
+    if WEBSHARE_USERNAME and WEBSHARE_PASSWORD:
+        from youtube_transcript_api.proxies import WebshareProxyConfig
+        logger.info("Using Webshare proxy for transcript fetch")
+        return YouTubeTranscriptApi(
+            proxy_config=WebshareProxyConfig(
+                proxy_username=WEBSHARE_USERNAME,
+                proxy_password=WEBSHARE_PASSWORD,
+            )
+        )
+    return YouTubeTranscriptApi()
+
+
 def _fetch_best_transcript(video_id: str):
     """List all available transcripts and pick the best one.
 
     Priority: manual English > auto English > manual any > auto any.
     """
-    ytt_api = YouTubeTranscriptApi()
+    ytt_api = _get_ytt_api()
     transcript_list = ytt_api.list(video_id)
 
     manual = []
