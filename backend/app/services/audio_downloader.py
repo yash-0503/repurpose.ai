@@ -3,7 +3,7 @@ import re
 import time
 import logging
 import httpx
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import (
     TranscriptsDisabled,
@@ -17,15 +17,10 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-WEBSHARE_USERNAME = os.getenv("WEBSHARE_PROXY_USERNAME")
-WEBSHARE_PASSWORD = os.getenv("WEBSHARE_PROXY_PASSWORD")
-TRANSCRIPT_HTTP_PROXY = os.getenv("YOUTUBE_TRANSCRIPT_HTTP_PROXY")
-TRANSCRIPT_HTTPS_PROXY = os.getenv("YOUTUBE_TRANSCRIPT_HTTPS_PROXY")
-
 _FETCH_RETRIES = max(1, int(os.getenv("YOUTUBE_TRANSCRIPT_FETCH_RETRIES", "4")))
 _FETCH_RETRY_BASE_SEC = float(os.getenv("YOUTUBE_TRANSCRIPT_RETRY_BASE_SEC", "4"))
 
-WEBSHARE_DOC = (
+_IP_BAN_DOCS = (
     "https://github.com/jdepoix/youtube-transcript-api/blob/master/README.md#working-around-ip-bans"
 )
 
@@ -72,53 +67,12 @@ def _fetch_title(url: str) -> str:
     return "Unknown"
 
 
-def _parse_webshare_locations() -> Optional[List[str]]:
-    raw = os.getenv("WEBSHARE_PROXY_LOCATIONS", "").strip()
-    if not raw:
-        return None
-    return [x.strip().lower() for x in raw.split(",") if x.strip()]
-
-
-def _get_ytt_api() -> YouTubeTranscriptApi:
-    """Build API client: generic proxy > Webshare > direct."""
-    if TRANSCRIPT_HTTP_PROXY or TRANSCRIPT_HTTPS_PROXY:
-        from youtube_transcript_api.proxies import GenericProxyConfig
-
-        logger.info("Using YOUTUBE_TRANSCRIPT_* proxy for transcript fetch")
-        return YouTubeTranscriptApi(
-            proxy_config=GenericProxyConfig(
-                http_url=TRANSCRIPT_HTTP_PROXY,
-                https_url=TRANSCRIPT_HTTPS_PROXY,
-            )
-        )
-
-    if WEBSHARE_USERNAME and WEBSHARE_PASSWORD:
-        from youtube_transcript_api.proxies import WebshareProxyConfig
-
-        locations = _parse_webshare_locations()
-        retries = int(os.getenv("WEBSHARE_RETRIES_WHEN_BLOCKED", "25"))
-        logger.info(
-            "Using Webshare proxy for transcript fetch "
-            f"(locations={locations or 'any'}, retries_when_blocked={retries})"
-        )
-        return YouTubeTranscriptApi(
-            proxy_config=WebshareProxyConfig(
-                proxy_username=WEBSHARE_USERNAME,
-                proxy_password=WEBSHARE_PASSWORD,
-                filter_ip_locations=locations,
-                retries_when_blocked=retries,
-            )
-        )
-
-    return YouTubeTranscriptApi()
-
-
 def _fetch_best_transcript(video_id: str):
     """List all available transcripts and pick the best one.
 
     Priority: manual English > auto English > manual any > auto any.
     """
-    ytt_api = _get_ytt_api()
+    ytt_api = YouTubeTranscriptApi()
     transcript_list = ytt_api.list(video_id)
 
     manual = []
@@ -146,7 +100,7 @@ def _fetch_best_transcript(video_id: str):
 
 
 def _map_transient_error(exc: Exception) -> Optional[TranscriptFetchError]:
-    """Turn Google CAPTCHA / rate-limit into a clear, actionable error."""
+    """Turn Google CAPTCHA / rate-limit into a clear error."""
     msg = str(exc)
     low = msg.lower()
     if (
@@ -157,11 +111,9 @@ def _map_transient_error(exc: Exception) -> Optional[TranscriptFetchError]:
         or "responseerror" in low
     ):
         return TranscriptFetchError(
-            "YouTube blocked this server (Google CAPTCHA or rate limit). "
-            "Datacenter / free Webshare 'Proxy Server' IPs usually fail. "
-            "Fix: use Webshare **Residential** rotating proxies (not Static Residential), "
-            "or set YOUTUBE_TRANSCRIPT_HTTP_PROXY to a trusted residential proxy URL. "
-            f"Docs: {WEBSHARE_DOC}"
+            "YouTube blocked this server (bot check, CAPTCHA, or rate limit). "
+            "This often happens on cloud provider IPs. "
+            f"See youtube-transcript-api notes on proxies: {_IP_BAN_DOCS}"
         )
     return None
 
