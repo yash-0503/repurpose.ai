@@ -1,6 +1,7 @@
 # Repurpose.ai
 
 Turn YouTube videos into blogs, LinkedIn posts, and Twitter threads — with optional writing style matching.
+Note: Working of the Tool at the end ✌️.
 
 ## What it does
 
@@ -118,3 +119,11 @@ Interactive docs available at `http://localhost:8000/docs` when running.
 ## Deployment
 
 See [DEPLOYMENT.md](./DEPLOYMENT.md) for instructions on deploying to Vercel (frontend) + Render (backend).
+
+##Demo
+
+
+
+https://github.com/user-attachments/assets/74355d35-fea1-4551-a1e5-a5a2123393f9
+
+
