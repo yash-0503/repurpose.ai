@@ -15,6 +15,7 @@ from app.services.audio_downloader import fetch_transcript as fetch_transcript_s
 from app.services.style_analyzer import analyze_style, StyleAnalysisError
 from app.services.generate_blog_from_style import generate_blog_from_transcript
 from app.database import get_db, User, Style, Blog, init_db
+from app.rate_limit import check_rate_limit
 from app.auth import (
     get_current_user, 
     get_current_user_required,
@@ -60,15 +61,6 @@ class GenerateBlogResponse(BaseModel):
     blog_content: str
     blog_id: Optional[str] = None
 
-# User models
-class UserResponse(BaseModel):
-    id: str
-    email: str
-    name: Optional[str]
-    avatar_url: Optional[str]
-    
-    class Config:
-        from_attributes = True
 
 # Style models
 class StyleCreate(BaseModel):
@@ -83,6 +75,19 @@ class StyleResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+# User models
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    name: Optional[str]
+    avatar_url: Optional[str]
+    styles: List[StyleResponse] = []
+    default_style_id: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
+
 
 # Blog models
 class BlogResponse(BaseModel):
@@ -189,14 +194,51 @@ async def google_callback(
         logger.exception("OAuth callback failed")
         raise HTTPException(status_code=500, detail=f"Authentication failed: {str(e)}")
 
+async def _get_user_styles(db: AsyncSession, user: User) -> List[Style]:
+    result = await db.execute(
+        select(Style).where(Style.user_id == user.id).order_by(Style.created_at.desc())
+    )
+    return list(result.scalars().all())
+
+
+def _style_to_response(style: Style) -> StyleResponse:
+    return StyleResponse(
+        id=str(style.id),
+        name=style.name,
+        style_guide=style.style_guide,
+        created_at=style.created_at,
+    )
+
+
+async def _save_user_style(
+    db: AsyncSession,
+    user: User,
+    name: str,
+    style_guide: str,
+) -> Style:
+    style = Style(user_id=user.id, name=name, style_guide=style_guide)
+    db.add(style)
+    await db.flush()
+    user.default_style_id = style.id
+    await db.commit()
+    await db.refresh(style)
+    return style
+
+
 @app.get("/auth/me", response_model=UserResponse)
-async def get_me(user: User = Depends(get_current_user_required)):
-    """Get current authenticated user"""
+async def get_me(
+    user: User = Depends(get_current_user_required),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get current authenticated user with saved styles"""
+    styles = await _get_user_styles(db, user)
     return UserResponse(
         id=str(user.id),
         email=user.email,
         name=user.name,
-        avatar_url=user.avatar_url
+        avatar_url=user.avatar_url,
+        styles=[_style_to_response(s) for s in styles],
+        default_style_id=str(user.default_style_id) if user.default_style_id else None,
     )
 
 @app.post("/auth/logout")
@@ -231,22 +273,34 @@ async def create_style(
     user: User = Depends(get_current_user_required),
     db: AsyncSession = Depends(get_db)
 ):
-    """Create a new style"""
-    style = Style(
-        user_id=user.id,
-        name=style_data.name,
-        style_guide=style_data.style_guide
+    """Save a writing style (raw sample text, no analysis)."""
+    check_rate_limit(
+        key=f"style_save:{user.id}",
+        max_calls=5,
+        window_sec=600,
+        label="style saves",
     )
-    db.add(style)
-    await db.commit()
-    await db.refresh(style)
-    
-    return StyleResponse(
-        id=str(style.id),
-        name=style.name,
-        style_guide=style.style_guide,
-        created_at=style.created_at
-    )
+
+    name = style_data.name.strip()
+    style_guide = style_data.style_guide.strip()
+
+    if not name:
+        raise HTTPException(status_code=400, detail="Style name is required")
+    if len(name) > 100:
+        raise HTTPException(status_code=400, detail="Style name must be 100 characters or less")
+    if len(style_guide) < 50:
+        raise HTTPException(
+            status_code=400,
+            detail="Style sample must be at least 50 characters",
+        )
+
+    try:
+        saved = await _save_user_style(db, user, name, style_guide)
+        logger.info(f"Style saved: {saved.name} ({saved.id}) for user {user.email}")
+        return _style_to_response(saved)
+    except Exception as e:
+        logger.exception("Style save failed")
+        raise HTTPException(status_code=500, detail=f"Style save failed: {str(e)}")
 
 @app.delete("/api/styles/{style_id}")
 async def delete_style(
@@ -343,6 +397,12 @@ async def get_transcript(
     user: User = Depends(get_current_user_required)
 ):
     """Fetch transcript from a YouTube video using captions (requires authentication)"""
+    check_rate_limit(
+        key=f"transcript:{user.id}",
+        max_calls=10,
+        window_sec=600,
+        label="transcript requests",
+    )
     try:
         logger.info(f"Fetching transcript for: {request.url} (user: {user.email})")
         result = await asyncio.to_thread(fetch_transcript_service, request.url)
@@ -386,6 +446,12 @@ async def generate_blog(
     db: AsyncSession = Depends(get_db)
 ):
     """Generate content from transcript with platform-specific formatting (requires authentication)"""
+    check_rate_limit(
+        key=f"generate:{user.id}",
+        max_calls=10,
+        window_sec=600,
+        label="content generations",
+    )
     try:
         logger.info(f"Generating {request.output_format or 'blog'} content (user: {user.email})")
         
@@ -395,49 +461,22 @@ async def generate_blog(
                 detail="Transcript must be at least 50 characters"
             )
         
-        # Get style guide - either from request or from saved style
         style = ""
         style_id = None
         
-        # Option 1: User selected a saved style
         if request.style_id:
             result = await db.execute(
                 select(Style).where(Style.id == request.style_id, Style.user_id == user.id)
             )
             saved_style = result.scalar_one_or_none()
-            if saved_style:
-                style = saved_style.style_guide
-                style_id = saved_style.id
-                logger.debug(f"Using saved style: {saved_style.name}")
+            if not saved_style:
+                raise HTTPException(status_code=404, detail="Selected style not found")
+            style = saved_style.style_guide
+            style_id = saved_style.id
+            user.default_style_id = saved_style.id
+            await db.commit()
+            logger.info(f"Using saved style: {saved_style.name} ({saved_style.id})")
         
-        # Option 2: User provided custom text to analyze - analyze and save as "My Style"
-        elif request.style_guide and len(request.style_guide.strip()) >= 100:
-            analyzed_style = await asyncio.to_thread(analyze_style, request.style_guide)
-            style = analyzed_style
-            
-            # Save as "My Style"
-            # Check if user already has "My Style"
-            result = await db.execute(
-                select(Style).where(Style.user_id == user.id, Style.name == "My Style")
-            )
-            existing_style = result.scalar_one_or_none()
-            
-            if existing_style:
-                # Update existing style
-                existing_style.style_guide = analyzed_style
-                style_id = existing_style.id
-            else:
-                # Create new style
-                new_style = Style(
-                    user_id=user.id,
-                    name="My Style",
-                    style_guide=analyzed_style
-                )
-                db.add(new_style)
-                await db.flush()
-                style_id = new_style.id
-        
-        # Run in thread to avoid asyncio.run() conflict with FastAPI's event loop
         blog_content = await asyncio.to_thread(
             generate_blog_from_transcript, 
             request.transcript, 
