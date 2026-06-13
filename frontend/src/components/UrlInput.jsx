@@ -3,14 +3,16 @@ import { useAuth } from '../context/AuthContext';
 import StyleSelector from './StyleSelector';
 import OutputFormatSelector from './OutputFormatSelector';
 
-export default function UrlInput({ 
-  onSubmit, 
-  styleText, 
-  onStyleChange, 
-  selectedStyleId, 
+export default function UrlInput({
+  onSubmit,
+  styleText,
+  onStyleChange,
+  styleMode,
+  onStyleModeChange,
+  selectedStyleId,
   onStyleIdChange,
   outputFormat,
-  onOutputFormatChange
+  onOutputFormatChange,
 }) {
   const { user } = useAuth();
   const [url, setUrl] = useState('');
@@ -24,17 +26,17 @@ export default function UrlInput({
   const handleSubmit = (e) => {
     e.preventDefault();
     setError('');
-    
+
     if (!user) {
       setError('Please log in to generate content');
       return;
     }
-    
+
     if (!url.trim()) {
       setError('Please enter a YouTube URL');
       return;
     }
-    
+
     if (!validateYouTubeUrl(url)) {
       setError('Please enter a valid YouTube URL');
       return;
@@ -44,8 +46,18 @@ export default function UrlInput({
       setError('Please select an output format');
       return;
     }
-    
-    onSubmit(url, styleText, selectedStyleId, outputFormat);
+
+    if (styleMode === 'saved' && !selectedStyleId) {
+      setError('Please select a saved style from the list');
+      return;
+    }
+
+    if (styleMode === 'custom' && styleText.trim().length > 0) {
+      setError('Please click "Save Style" first, then select it from Your Saved Styles');
+      return;
+    }
+
+    onSubmit(url, styleText, selectedStyleId, outputFormat, styleMode);
   };
 
   return (
@@ -54,7 +66,7 @@ export default function UrlInput({
       <p className="card-subtitle">
         Paste a YouTube URL and we'll repurpose it for your platform
       </p>
-      
+
       {!user && (
         <div className="auth-prompt" style={{
           backgroundColor: 'var(--surface-secondary)',
@@ -62,27 +74,27 @@ export default function UrlInput({
           borderRadius: '12px',
           marginBottom: '1.5rem',
           textAlign: 'center',
-          border: '1px solid var(--border)'
+          border: '1px solid var(--border)',
         }}>
           <div style={{ fontSize: '3rem', marginBottom: '0.75rem' }}>🔒</div>
-          <h3 style={{ 
-            fontSize: '1.25rem', 
-            fontWeight: '600', 
+          <h3 style={{
+            fontSize: '1.25rem',
+            fontWeight: '600',
             marginBottom: '0.5rem',
-            color: 'var(--text-primary)'
+            color: 'var(--text-primary)',
           }}>
             Login Required
           </h3>
-          <p style={{ 
-            color: 'var(--text-secondary)', 
+          <p style={{
+            color: 'var(--text-secondary)',
             marginBottom: '0',
-            fontSize: '0.95rem'
+            fontSize: '0.95rem',
           }}>
             Sign in with Google using the button in the top right to start generating content
           </p>
         </div>
       )}
-      
+
       <form onSubmit={handleSubmit}>
         <div className="input-group">
           <label className="input-label">YouTube Video URL</label>
@@ -103,6 +115,8 @@ export default function UrlInput({
         />
 
         <StyleSelector
+          styleMode={styleMode}
+          onStyleModeChange={onStyleModeChange}
           selectedStyleId={selectedStyleId}
           onStyleSelect={onStyleIdChange}
           customStyle={styleText}
@@ -117,9 +131,9 @@ export default function UrlInput({
           </div>
         )}
 
-        <button 
-          type="submit" 
-          className="btn btn-primary" 
+        <button
+          type="submit"
+          className="btn btn-primary"
           style={{ width: '100%', marginTop: '1.5rem' }}
           disabled={!user}
         >
