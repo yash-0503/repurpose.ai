@@ -10,21 +10,21 @@ import BlogHistory from './components/BlogHistory';
 import { getTranscript, generateBlog } from './api/repurpose';
 
 function AppContent() {
-  const { user, token, loading: authLoading } = useAuth();
+  const { user, token, loading: authLoading, defaultStyleId, refetchUserData } = useAuth();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [currentStage, setCurrentStage] = useState('');
   const [error, setError] = useState('');
   const [blogContent, setBlogContent] = useState('');
   const [styleText, setStyleText] = useState('');
+  const [styleMode, setStyleMode] = useState('none');
   const [selectedStyleId, setSelectedStyleId] = useState(null);
   const [outputFormat, setOutputFormat] = useState({ format: 'blog', option: null });
   const [showHistory, setShowHistory] = useState(false);
   const [currentUrl, setCurrentUrl] = useState('');
   const [currentTitle, setCurrentTitle] = useState('');
 
-  const handleGenerate = async (url, style, styleId, format) => {
-    // Check if user is logged in
+  const handleGenerate = async (url, style, styleId, format, mode) => {
     if (!user || !token) {
       setError('Please log in to generate content');
       return;
@@ -34,28 +34,35 @@ function AppContent() {
     setError('');
     setStep(2);
     setCurrentUrl(url);
+
+    const payload = {
+      transcript: null,
+      styleGuide: '',
+      styleId: null,
+      youtubeUrl: url,
+      title: null,
+      outputFormat: format.format,
+      outputOption: format.option,
+    };
+
+    if (mode === 'saved') {
+      payload.styleId = styleId;
+    } else if (mode === 'custom' && styleId) {
+      payload.styleId = styleId;
+    }
     
     try {
-      // Stage 1: Fetch transcript from YouTube captions
       setCurrentStage('transcript');
       const transcriptResult = await getTranscript(token, url);
-      console.log('Transcript fetched:', transcriptResult);
       setCurrentTitle(transcriptResult.title);
+      payload.transcript = transcriptResult.text;
+      payload.title = transcriptResult.title;
 
-      // Stage 2: Generate content (style analysis happens in backend if needed)
       setCurrentStage('generate');
-      const blogResult = await generateBlog(token, {
-        transcript: transcriptResult.text,
-        styleGuide: style,
-        styleId: styleId,
-        youtubeUrl: url,
-        title: transcriptResult.title,
-        outputFormat: format.format,
-        outputOption: format.option
-      });
-      console.log('Content generation complete');
+      const blogResult = await generateBlog(token, payload);
 
       setBlogContent(blogResult.blog_content);
+      await refetchUserData();
       setStep(3);
       setLoading(false);
 
@@ -73,7 +80,8 @@ function AppContent() {
     setError('');
     setBlogContent('');
     setStyleText('');
-    setSelectedStyleId(null);
+    setStyleMode(defaultStyleId ? 'saved' : 'none');
+    setSelectedStyleId(defaultStyleId || null);
     setOutputFormat({ format: 'blog', option: null });
     setCurrentUrl('');
     setCurrentTitle('');
@@ -112,10 +120,12 @@ function AppContent() {
         <StepIndicator currentStep={step} />
 
         {step === 1 && !loading && (
-          <UrlInput 
+          <UrlInput
             onSubmit={handleGenerate}
             styleText={styleText}
             onStyleChange={setStyleText}
+            styleMode={styleMode}
+            onStyleModeChange={setStyleMode}
             selectedStyleId={selectedStyleId}
             onStyleIdChange={setSelectedStyleId}
             outputFormat={outputFormat}

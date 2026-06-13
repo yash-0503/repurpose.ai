@@ -57,11 +57,14 @@ export async function createStyle(token, name, styleGuide) {
   const response = await fetch(`${API_BASE}/styles`, {
     method: 'POST',
     headers: getAuthHeaders(token),
-    body: JSON.stringify({ name, style_guide: styleGuide }),
+    body: JSON.stringify({ name: name.trim(), style_guide: styleGuide.trim() }),
   });
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(error.detail || 'Failed to create style');
+    const detail = error.detail;
+    throw new Error(
+      typeof detail === 'string' ? detail : detail?.[0]?.msg || 'Failed to create style'
+    );
   }
   return response.json();
 }
